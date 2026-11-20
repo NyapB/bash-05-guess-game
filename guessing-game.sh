@@ -42,11 +42,133 @@ esac
 log_file="history.log"
 damaged_count=0
 
+# --- NEW FUNCTIONS ADDED IN COMMIT 5 ---
+
+show_history() {
+    echo ""
+    echo "=== History for $name ==="
+    if [[ ! -f "$log_file" ]]; then
+        echo "No games recorded yet."
+        return
+    fi
+
+    local games=0 total_tries=0 total_sec=0 best_tries=""
+    printf "%-8s | %-19s | %-5s | %-7s\n" "Level" "Start Time" "Tries" "Seconds"
+    echo "------------------------------------------------"
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+        local pipe_count
+        pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
+        (( pipe_count != 5 )) && continue
+
+        local f_player f_level f_start f_tries f_seconds
+        f_player=$(echo "$line" | cut -d'|' -f1)
+        f_level=$(echo "$line" | cut -d'|' -f2)
+        f_start=$(echo "$line" | cut -d'|' -f3)
+        f_tries=$(echo "$line" | cut -d'|' -f5)
+        f_seconds=$(echo "$line" | cut -d'|' -f6)
+
+        [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] && continue
+        [[ ! "$f_tries" =~ ^[0-9]+$ || ! "$f_seconds" =~ ^[0-9]+$ ]] && continue
+
+        if [[ "$f_player" == "$name" ]]; then
+            printf "%-8s | %-19s | %-5s | %-7s\n" "$f_level" "$f_start" "$f_tries" "$f_seconds"
+            ((games++))
+            ((total_tries += f_tries))
+            ((total_sec += f_seconds))
+            if [[ -z "$best_tries" ]] || (( f_tries < best_tries )); then
+                best_tries=$f_tries
+            fi
+        fi
+    done < "$log_file"
+
+    echo "------------------------------------------------"
+    if (( games == 0 )); then
+        echo "No valid games found for $name."
+    else
+        local avg_tries=$(( total_tries / games ))
+        echo "Summary: $games game(s) | Best: $best_tries tries | Avg: $avg_tries tries | Total time: ${total_sec}s"
+    fi
+}
+
+show_leaderboard() {
+    echo ""
+    echo "=== Top 5 Leaderboard ($level level) ==="
+    if [[ ! -f "$log_file" ]]; then
+        echo "No games recorded yet."
+        return
+    fi
+
+    awk -F'|' -v lvl="$level" '
+        NF == 6 && $2 == lvl && $5 ~ /^[0-9]+$/ && $6 ~ /^[0-9]+$/ {
+            player = $1
+            tries = $5 + 0
+            secs = $6 + 0
+            if (!(player in best_tries) || tries < best_tries[player] || (tries == best_tries[player] && secs < best_secs[player])) {
+                best_tries[player] = tries
+                best_secs[player] = secs
+            }
+        }
+        END {
+            for (p in best_tries) {
+                printf "%d|%d|%s\n", best_tries[p], best_secs[p], p
+            }
+        }
+    ' "$log_file" | sort -t'|' -k1,1n -k2,2n | head -n 5 | awk -F'|' '
+        BEGIN { printf "%-4s | %-15s | %-5s | %-7s\n", "Rank", "Player", "Tries", "Seconds"; print "----------------------------------------" }
+        { printf "%-4s | %-15s | %-5s | %-7s\n", NR, $3, $1, $2 }
+    '
+}
+
+delete_history() {
+    if [[ ! -f "$log_file" ]]; then
+        echo "No history file found."
+        return
+    fi
+
+    read -r -p "Are you sure you want to delete all history for '$name'? (y/n): " confirm
+    case "${confirm,,}" in
+        y|yes)
+            local tmp_file
+            tmp_file=$(mktemp)
+            awk -F'|' -v p="$name" '$1 != p' "$log_file" > "$tmp_file" && mv "$tmp_file" "$log_file"
+            echo "History for '$name' has been deleted."
+            ;;
+        *)
+            echo "Deletion cancelled."
+            ;;
+    esac
+}
+
+# --- EXISTING COMMIT 4 GAMEPLAY CODE ---
+
 echo "=========================="
 echo "Hi $name, Welcome to our guessing game."
 echo "==========================="
 
-old_best=$(grep "^${name}|${level}|" "$log_file" 2>/dev/null | cut -d'|' -f5 | sort -n | head -n 1)
+old_best=""
+if [[ -f "$log_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+        pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
+        (( pipe_count != 5 )) && continue
+
+        f_player=$(echo "$line" | cut -d'|' -f1)
+        f_level=$(echo "$line" | cut -d'|' -f2)
+        f_tries=$(echo "$line" | cut -d'|' -f5)
+        f_seconds=$(echo "$line" | cut -d'|' -f6)
+
+        [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] && continue
+        [[ ! "$f_tries" =~ ^[0-9]+$ || ! "$f_seconds" =~ ^[0-9]+$ ]] && continue
+
+        if [[ "$f_player" == "$name" && "$f_level" == "$level" ]]; then
+            if [[ -z "$old_best" ]] || (( f_tries < old_best )); then
+                old_best=$f_tries
+            fi
+        fi
+    done < "$log_file"
+fi
 
 guess=-1
 count=0
@@ -74,45 +196,47 @@ done
 
 end_time=$(date '+%Y-%m-%d %H:%M:%S')
 end_second=$(date +%s)
-duration=$(( $end_second - $start_sec ))
+duration=$(( end_second - start_sec ))
 
-if [[ -f "$log_file" ]];then 
-    while IFS= read -r line  || [[ -n "$line" ]]; do    
+if [[ -f "$log_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
         #skip empty lines
         [[ -z "$line" ]] && continue
 
         #rule 1: must have exactly 6 fields (which means exactly 5 pipe characters)
         pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
-        if (( pipr_count != 5)); then   
-            (( damaged_count++))
+        if (( pipe_count != 5 )); then
+            ((damaged_count++))
             continue
         fi
 
-        #extract fields to test them
-        level=$(echo "$line" | cut -d '|' -f2)
-        count=$(echo "$line" | cut -d '|' -f5)
-        seconds=$(echo "$line" | cut -d '|' -f6)
+        #extract fields to test them without overwriting current game variables
+        f_player=$(echo "$line" | cut -d '|' -f1)
+        f_level=$(echo "$line" | cut -d '|' -f2)
+        f_tries=$(echo "$line" | cut -d '|' -f5)
+        f_seconds=$(echo "$line" | cut -d '|' -f6)
 
-        #level must be easy/hard/normal, tries and seconds must be whole numbers
-        if [[ ! "$level" =~ ^(easy|normal|hard)$ ]] || [[ ! "$count" =~ ^[0-9]+$ ]] || [[ ! "seconds" =~ ^[0-9]+$ ]]; then
+        #player must be non-empty, level must be easy/hard/normal, tries and seconds must be whole numbers
+        if [[ -z "$f_player" ]] || [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] || [[ ! "$f_tries" =~ ^[0-9]+$ ]] || [[ ! "$f_seconds" =~ ^[0-9]+$ ]]; then
             ((damaged_count++))
         fi
     done < "$log_file"
 fi
 
-#show the menu warning if any broken lines exist
+#show the warning if any broken lines exist
 if (( damaged_count > 0 )); then
-    echo "Warninf: $damaged_count damaged line(s) were found and skipped"
+    echo "Warning: $damaged_count damaged line(s) were found and skipped"
 fi
 
-echo "${name}|${level}|${start_time}|${end_time}|${duration}" >> "$log_file"
+#write exact 6-field format: player|level|start|end|tries|seconds
+echo "${name}|${level}|${start_time}|${end_time}|${count}|${duration}" >> "$log_file"
 
 echo "Performance summary"
-if [ -z "$old_best" ]; then
+if [[ -z "$old_best" ]]; then
     echo "First time playing $level level! Record saved"
-elif  [[ $count -lt $old_best ]]; then
+elif (( count < old_best )); then
     echo "New personal best for $level level!"
-else 
+else
     echo "Your personal best of $level level is still $old_best tries."
 fi
-    echo "Congratulations!! you guessed correctly after trying $count number time(s)"
+echo "Congratulations!! you guessed correctly after trying $count number time(s)"
