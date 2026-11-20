@@ -8,7 +8,7 @@ if [[ -z "$name" ]];then
     exit 1
 fi
 
-start-time=$(date '+%Y-%m-%d %H:%M:%S')
+start_time=$(date '+%Y-%m-%d %H:%M:%S')
 start_sec=$(date +%s)
 log_file="history.log"
 damaged_count=0
@@ -41,8 +41,27 @@ if [[ -z "$level" ]] || [[ "$level" == "normal" ]]; then
     max=100
     range="1-100"
     number=$(( RANDOM % $max + 1 ))
-while (( guess != number )); do
-        read -r -p "Please guess a number between 0 and 100: " guess
+    while (( guess != number )); do
+            read -r -p "Please guess a number between 0 and 100: " guess
+
+            if [[ -z "$guess" ]]; then
+                echo "Please enter a number: "
+                exit 1;
+            elif (( guess > number)); then
+                echo "Your guess is higher than the number"
+            elif (( guess < number )); then
+                echo "Your guess is lower than the number"   
+            fi
+            ((count++))
+    done
+
+
+elif [[ "$level" == "easy" ]]; then
+    max=50
+    range="0-50"
+    number=$(( RANDOM % $max + 1 ))
+    while (( guess != number )); do
+        read -r -p "Please guess a number between 0 and 50: " guess
 
         if [[ -z "$guess" ]]; then
             echo "Please enter a number: "
@@ -53,48 +72,31 @@ while (( guess != number )); do
             echo "Your guess is lower than the number"   
         fi
         ((count++))
-done
-
-
-elif [[ "$level" == "easy" ]]; then
-    max=50
-    range="0-50"
-    number=$(( RANDOM % $max + 1 ))
-while (( guess != number )); do
-    read -r -p "Please guess a number between 0 and 50: " guess
-
-    if [[ -z "$guess" ]]; then
-        echo "Please enter a number: "
-        exit 1;
-    elif (( guess > number)); then
-        echo "Your guess is higher than the number"
-    elif (( guess < number )); then
-        echo "Your guess is lower than the number"   
-    fi
-    ((count++))
-done
+    done
 
 
 elif [[ "$level" == "hard" ]]; then
     max=1000
     range="0 - 1000"
     number=$(( RANDOM % $max + 1 ))
-while (( guess != number )); do
-    read -r -p "Please guess a number between 0 and 1000: " guess
+    while (( guess != number )); do
+        read -r -p "Please guess a number between 0 and 1000: " guess
 
-    if [[ -z "$guess" ]]; then
-        echo "Please enter a number: "
-        exit 1;
-    elif (( guess > number)); then
-        echo "Your guess is higher than the number"
-    elif (( guess < number )); then
-        echo "Your guess is lower than the number"   
-    fi
-    ((count++))
-done
+        if [[ -z "$guess" ]]; then
+            echo "Please enter a number: "
+            exit 1;
+        elif (( guess > number)); then
+            echo "Your guess is higher than the number"
+        elif (( guess < number )); then
+            echo "Your guess is lower than the number"   
+        fi
+        ((count++))
+    done
+
 else 
     echo "a correct level please"
 fi
+
 end_time=$(date '+%Y-%m-%d %H:%M:%S')
 end_second=$(date +%s)
 duration=$(( $end_second - $start_sec ))
