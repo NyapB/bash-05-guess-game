@@ -1,143 +1,114 @@
 #!/bin/bash
 
-#this is a guessing game
-
+# Usage check for name and level
 name="$1"
-if [[ -z "$name" ]];then  
-    printf "usage: ./intro.sh <name>\n where name is the name of the user playing the game"
-    exit 1
-fi
-
-start_time=$(date '+%Y-%m-%d %H:%M:%S')
-start_sec=$(date +%s)
-log_file="history.log"
-damaged_count=0
-
-echo "=========================="
-echo "Hi $name, Welcome to our guessing game."
-echo "==========================="
-
-
-guess=-1
-count=0
-start_time=$(date '+%Y-%m-%d %H:%M:%S')
-start_sec=$(date +%s)
-
-
 level="${2,,}"
 
-if [[ -z "$level" ]];then  
-    printf "usage: ./intro.sh <level>\n where name is the desired level of the user playing the game"
+if [[ -z "$name" || -z "$level" ]] || [[ "$#" -gt 2 ]]; then
+    printf "Usage: ./intro.sh <name> <level>\n"
+    printf "Levels: easy, normal, hard\n"
     exit 1
 fi
 
-if [[ "$#" -gt 2 ]]; then
-    echo "Error: incorrect level. "
-    exit 1
-fi
+# Set difficulty range
+case "$level" in
+    easy)   max=50 ;;
+    normal) max=100 ;;
+    hard)   max=1000 ;;
+    *)
+        echo "Error: Invalid level '$level'. Choose easy, normal, or hard."
+        exit 1
+        ;;
+esac
 
-old_best=$(grep "^${name}|${level}|" "$log_file" | cut -d'|' -f5 | sort -n | head -n 1)
-if [[ -z "$level" ]] || [[ "$level" == "normal" ]]; then
-    max=100
-    range="1-100"
-    number=$(( RANDOM % $max + 1 ))
-    while (( guess != number )); do
-            read -r -p "Please guess a number between 0 and 100: " guess
+log_file="history.log"
+damaged_count=0
+old_best=""
 
-            if [[ -z "$guess" ]]; then
-                echo "Please enter a number: "
-                exit 1;
-            elif (( guess > number)); then
-                echo "Your guess is higher than the number"
-            elif (( guess < number )); then
-                echo "Your guess is lower than the number"   
-            fi
-            ((count++))
-    done
-
-
-elif [[ "$level" == "easy" ]]; then
-    max=50
-    range="0-50"
-    number=$(( RANDOM % $max + 1 ))
-    while (( guess != number )); do
-        read -r -p "Please guess a number between 0 and 50: " guess
-
-        if [[ -z "$guess" ]]; then
-            echo "Please enter a number: "
-            exit 1;
-        elif (( guess > number)); then
-            echo "Your guess is higher than the number"
-        elif (( guess < number )); then
-            echo "Your guess is lower than the number"   
-        fi
-        ((count++))
-    done
-
-
-elif [[ "$level" == "hard" ]]; then
-    max=1000
-    range="0 - 1000"
-    number=$(( RANDOM % $max + 1 ))
-    while (( guess != number )); do
-        read -r -p "Please guess a number between 0 and 1000: " guess
-
-        if [[ -z "$guess" ]]; then
-            echo "Please enter a number: "
-            exit 1;
-        elif (( guess > number)); then
-            echo "Your guess is higher than the number"
-        elif (( guess < number )); then
-            echo "Your guess is lower than the number"   
-        fi
-        ((count++))
-    done
-
-else 
-    echo "a correct level please"
-fi
-
-end_time=$(date '+%Y-%m-%d %H:%M:%S')
-end_second=$(date +%s)
-duration=$(( $end_second - $start_sec ))
-
-if [[ -f "$log_file" ]];then 
-    while IFS= read -r line  || [[ -n "$line" ]]; do    
-        #skip empty lines
+# Validate existing log file and find personal best safely
+if [[ -f "$log_file" ]]; then
+    while IFS= read -r line || [[ -n "$line" ]]; do
         [[ -z "$line" ]] && continue
 
-        #rule 1: must have exactly 6 fields (which means exactly 5 pipe characters)
+        # Rule 1: Must have 6 fields (5 pipes)
         pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
-        if (( pipr_count != 5)); then   
-            (( damaged_count++))
+        if (( pipe_count != 5 )); then
+            ((damaged_count++))
             continue
         fi
 
-        #extract fields to test them
-        level=$(echo "$line" | cut -d '|' -f2)
-        count=$(echo "$line" | cut -d '|' -f5)
-        seconds=$(echo "$line" | cut -d '|' -f6)
+        # Use separate variables so we don't overwrite the current game's stats
+        log_name=$(echo "$line" | cut -d '|' -f1)
+        log_level=$(echo "$line" | cut -d '|' -f2)
+        log_count=$(echo "$line" | cut -d '|' -f5)
+        log_seconds=$(echo "$line" | cut -d '|' -f6)
 
-        #level must be easy/hard/normal, tries and seconds must be whole numbers
-        if [[ ! "$level" =~ ^(easy|normal|hard)$ ]] || [[ ! "$count" =~ ^[0-9]+$ ]] || [[ ! "seconds" =~ ^[0-9]+$ ]]; then
+        if [[ ! "$log_level" =~ ^(easy|normal|hard)$ ]] || [[ ! "$log_count" =~ ^[0-9]+$ ]] || [[ ! "$log_seconds" =~ ^[0-9]+$ ]]; then
             ((damaged_count++))
+            continue
+        fi
+
+        # Track personal best from valid lines only
+        if [[ "$log_name" == "$name" && "$log_level" == "$level" ]]; then
+            if [[ -z "$old_best" ]] || (( log_count < old_best )); then
+                old_best=$log_count
+            fi
         fi
     done < "$log_file"
 fi
 
-#show the menu warning if any broken lines exist
+echo "=========================================="
+echo "Hi $name, Welcome to our guessing game!"
+echo "=========================================="
+
 if (( damaged_count > 0 )); then
-    echo "Warninf: $damaged_count damaged line(s) were found and skipped"
+    echo "Warning: $damaged_count damaged line(s) were found in $log_file and skipped."
 fi
 
-echo "${name}|${level}|${start_time}|${end_time}|${duration}" >> "$log_file"
+# Game initialization
+guess=-1
+count=0
+number=$(( RANDOM % max + 1 ))
+start_time=$(date '+%Y-%m-%d %H:%M:%S')
+start_sec=$(date +%s)
 
-echo "Performance summary"
-if [ -z "$old_best" ]; then
-    echo "First time playing $level level! Record saved"
-elif  [[ $count -lt $old_best ]]; then
-    echo "New personal best for $level level!"
-else 
-    echo "Your personal best of $level level is still $old_best tries."
+# Main guessing loop
+while (( guess != number )); do
+    read -r -p "Please guess a number between 1 and $max: " guess
+
+    # Validate that input is a positive whole number
+    if [[ ! "$guess" =~ ^[0-9]+$ ]]; then
+        echo "Invalid input. Please enter a whole number."
+        guess=-1
+        continue
+    fi
+
+    ((count++))
+
+    if (( guess > number )); then
+        echo "Your guess is higher than the number."
+    elif (( guess < number )); then
+        echo "Your guess is lower than the number."
+    fi
+done
+
+# End timer and calculate duration
+end_time=$(date '+%Y-%m-%d %H:%M:%S')
+end_sec=$(date +%s)
+duration=$(( end_sec - start_sec ))
+
+# Save all 6 fields to history.log
+echo "${name}|${level}|${start_time}|${end_time}|${count}|${duration}" >> "$log_file"
+
+# Performance summary
+echo ""
+echo "--- Performance Summary ---"
+echo "Congratulations!! You guessed $number after $count try(s) in ${duration}s."
+
+if [[ -z "$old_best" ]]; then
+    echo "First time playing $level level! Record saved."
+elif (( count < old_best )); then
+    echo "New personal best for $level level! (Previous best: $old_best)"
+else
+    echo "Your personal best for $level level is still $old_best try(s)."
 fi
-    echo "Congratulations!! you guessed correctly after trying $count number time(s)"
