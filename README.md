@@ -24,7 +24,7 @@ I built this project to practice writing clean Bash scripts—specifically handl
 
 ## ⚙ Installation & Setup
 
-Clone the repo and make the script executable:
+Clone the repository and make the script executable:
 
     git clone https://github.com
     cd bash_05_guess_game
@@ -61,7 +61,7 @@ Once the game starts, the menu displays your name, level, and range (for example
 
 1. Play: Starts a round, tells you if your guess is too high or too low, skips out-of-range numbers without counting them, saves your result, and checks for a new personal best.
 2. My History: Lists all your past games across every level, plus your total games, best score, average tries, and total time played.
-3. Leaderboard (<level>): Shows the Top 5 players for your current level (one best game per player, sorted by fewest tries and then fastest time).
+3. Leaderboard: Shows the Top 5 players for your current level (one best game per player, sorted by fewest tries and then fastest time).
 4. Delete My History: Asks for y/n confirmation, removes only your rows using a temporary file, and tells you how many games were deleted.
 5. Quit: Exits the game.
 
