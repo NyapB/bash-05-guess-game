@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#this is a guessing game
+# Guessing Game - Weekend Edition
 
 usage() {
-    printf "usage: %s <name> [level]\n" "$0"
-    printf "  name  : name of the user playing the game\n"
-    printf "  level : easy, normal, or hard (optional, defaults to normal)\n"
+    printf "Usage: %s <name> [level]\n" "$(basename "$0")" >&2
+    printf "  name  : alphanumeric player name (letters, numbers, _, -)\n" >&2
+    printf "  level : easy, normal, or hard (optional, defaults to normal)\n" >&2
     exit 1
 }
 
@@ -14,9 +14,13 @@ if [[ "$#" -lt 1 || "$#" -gt 2 ]]; then
 fi
 
 name="$1"
-if [[ -z "$name" ]]; then
+# Day 3 name validation: must be non-empty and contain only letters, numbers, underscores, or hyphens
+if [[ -z "$name" || ! "$name" =~ ^[a-zA-Z0-9_-]+$ ]]; then
+    echo "Error: Invalid player name '$name'. Use letters, numbers, underscores, or hyphens only." >&2
     usage
 fi
+# Normalize player name to lowercase so 'Ama' and 'ama' are treated as the same player
+name="${name,,}"
 
 level="${2:-normal}"
 level="${level,,}"
@@ -39,7 +43,8 @@ case "$level" in
         ;;
 esac
 
-log_file="history.log"
+# Read log file path from GAMES_FILE environment variable, defaulting to history.log
+log_file="${GAMES_FILE:-history.log}"
 
 show_history() {
     echo ""
@@ -144,10 +149,8 @@ play_game() {
 
     if [[ -f "$log_file" ]]; then
         while IFS= read -r line || [[ -n "$line" ]]; do
-            #skip empty lines
             [[ -z "$line" ]] && continue
 
-            #rule 1: must have exactly 6 fields (which means exactly 5 pipe characters)
             local pipe_count
             pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
             if (( pipe_count != 5 )); then
@@ -155,14 +158,12 @@ play_game() {
                 continue
             fi
 
-            #extract fields to test them without overwriting current game variables
             local f_player f_level f_tries f_seconds
             f_player=$(echo "$line" | cut -d '|' -f1)
             f_level=$(echo "$line" | cut -d '|' -f2)
             f_tries=$(echo "$line" | cut -d '|' -f5)
             f_seconds=$(echo "$line" | cut -d '|' -f6)
 
-            #player must be non-empty, level must be easy/hard/normal, tries and seconds must be whole numbers
             if [[ -z "$f_player" ]] || [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] || [[ ! "$f_tries" =~ ^[0-9]+$ ]] || [[ ! "$f_seconds" =~ ^[0-9]+$ ]]; then
                 ((damaged_count++))
                 continue
@@ -176,7 +177,6 @@ play_game() {
         done < "$log_file"
     fi
 
-    #show the warning if any broken lines exist
     if (( damaged_count > 0 )); then
         echo "Warning: $damaged_count damaged line(s) were found and skipped"
     fi
@@ -204,11 +204,18 @@ play_game() {
             continue
         fi
 
+        # Refuse out-of-range guesses without counting them as tries
+        if (( 10#$guess < min || 10#$guess > max )); then
+            echo "Out of range! Please enter a number between $min and $max."
+            guess=-1
+            continue
+        fi
+
         ((count++))
 
-        if (( guess > number )); then
+        if (( 10#$guess > number )); then
             echo "Your guess is higher than the number"
-        elif (( guess < number )); then
+        elif (( 10#$guess < number )); then
             echo "Your guess is lower than the number"
         fi
     done
@@ -217,7 +224,6 @@ play_game() {
     end_second=$(date +%s)
     duration=$(( end_second - start_sec ))
 
-    #write exact 6-field format: player|level|start|end|tries|seconds
     echo "${name}|${level}|${start_time}|${end_time}|${count}|${duration}" >> "$log_file"
 
     echo ""
@@ -238,25 +244,26 @@ echo "==========================="
 
 while true; do
     echo ""
+    echo "Player: $name · Level: $level ($min-$max)"
     echo "Menu:"
     echo "  1) Play"
     echo "  2) My History"
     echo "  3) Leaderboard ($level)"
     echo "  4) Delete My History"
-    echo "  q) Quit"
+    echo "  5) Quit"
     read -r -p "Choose an option: " choice
 
-    case "${choice,,}" in
+    case "$choice" in
         1) play_game ;;
         2) show_history ;;
         3) show_leaderboard ;;
         4) delete_history ;;
-        q)
+        5)
             echo "Goodbye, $name!"
             exit 0
             ;;
         *)
-            echo "Invalid option. Please choose 1, 2, 3, 4, or q."
+            echo "Invalid option. Please choose 1, 2, 3, 4, or 5."
             ;;
     esac
 done
