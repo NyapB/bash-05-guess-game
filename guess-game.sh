@@ -46,11 +46,68 @@ esac
 # Read log file path from GAMES_FILE environment variable, defaulting to history.log
 log_file="${GAMES_FILE:-history.log}"
 
+# Temporary staging file holding validated rows for the current menu iteration
+clean_log_file=$(mktemp)
+trap 'rm -f "$clean_log_file"' EXIT
+
+# Validate log_file once per menu display, populate clean_log_file, and warn on damaged lines
+load_clean_games() {
+    : > "$clean_log_file"
+    local damaged_count=0
+
+    if [[ ! -f "$log_file" ]]; then
+        return
+    fi
+
+    while IFS= read -r line || [[ -n "$line" ]]; do
+        [[ -z "$line" ]] && continue
+
+        # Verify exact 5 pipe characters (6 fields)
+        local stripped="${line//[^|]/}"
+        if (( ${#stripped} != 5 )); then
+            ((damaged_count++))
+            continue
+        fi
+
+        local f_player f_level f_start f_end f_tries f_seconds extra
+        IFS='|' read -r f_player f_level f_start f_end f_tries f_seconds extra <<< "$line"
+
+        # Validate required fields and numeric values
+        if [[ -z "$f_player" || -z "$f_start" || -z "$f_end" || -n "$extra" ]] || \
+           [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] || \
+           [[ ! "$f_tries" =~ ^[0-9]+$ ]] || \
+           [[ ! "$f_seconds" =~ ^[0-9]+$ ]]; then
+            ((damaged_count++))
+            continue
+        fi
+
+        printf "%s\n" "$line" >> "$clean_log_file"
+    done < "$log_file"
+
+    if (( damaged_count > 0 )); then
+        echo "Warning: $damaged_count damaged line(s) were found and skipped"
+    fi
+}
+
 show_history() {
     echo ""
     echo "=== History for $name ==="
-    if [[ ! -f "$log_file" ]]; then
-        echo "No games recorded yet."
+    if [[ ! -s "$clean_log_file" ]]; then
+        echo "No games yet"
+        return
+    fi
+
+    # Check if this player has any valid games before printing the table
+    local player_games=0
+    local f_player f_level f_start f_end f_tries f_seconds
+    while IFS='|' read -r f_player f_level f_start f_end f_tries f_seconds; do
+        if [[ "$f_player" == "$name" ]]; then
+            ((player_games++))
+        fi
+    done < "$clean_log_file"
+
+    if (( player_games == 0 )); then
+        echo "No games yet"
         return
     fi
 
@@ -58,52 +115,34 @@ show_history() {
     printf "%-8s | %-19s | %-5s | %-7s\n" "Level" "Start Time" "Tries" "Seconds"
     echo "------------------------------------------------"
 
-    while IFS= read -r line || [[ -n "$line" ]]; do
-        [[ -z "$line" ]] && continue
-        local pipe_count
-        pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
-        (( pipe_count != 5 )) && continue
-
-        local f_player f_level f_start f_tries f_seconds
-        f_player=$(echo "$line" | cut -d'|' -f1)
-        f_level=$(echo "$line" | cut -d'|' -f2)
-        f_start=$(echo "$line" | cut -d'|' -f3)
-        f_tries=$(echo "$line" | cut -d'|' -f5)
-        f_seconds=$(echo "$line" | cut -d'|' -f6)
-
-        [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] && continue
-        [[ ! "$f_tries" =~ ^[0-9]+$ || ! "$f_seconds" =~ ^[0-9]+$ ]] && continue
-
+    while IFS='|' read -r f_player f_level f_start f_end f_tries f_seconds; do
         if [[ "$f_player" == "$name" ]]; then
             printf "%-8s | %-19s | %-5s | %-7s\n" "$f_level" "$f_start" "$f_tries" "$f_seconds"
             ((games++))
-            ((total_tries += f_tries))
-            ((total_sec += f_seconds))
-            if [[ -z "$best_tries" ]] || (( f_tries < best_tries )); then
+            ((total_tries += 10#$f_tries))
+            ((total_sec += 10#$f_seconds))
+            if [[ -z "$best_tries" ]] || (( 10#$f_tries < 10#$best_tries )); then
                 best_tries=$f_tries
             fi
         fi
-    done < "$log_file"
+    done < "$clean_log_file"
 
     echo "------------------------------------------------"
-    if (( games == 0 )); then
-        echo "No valid games found for $name."
-    else
-        local avg_tries=$(( total_tries / games ))
-        echo "Summary: $games game(s) | Best: $best_tries tries | Avg: $avg_tries tries | Total time: ${total_sec}s"
-    fi
+    local avg_tries=$(( total_tries / games ))
+    echo "Summary: $games game(s) | Best: $best_tries tries | Avg: $avg_tries tries | Total time: ${total_sec}s"
 }
 
 show_leaderboard() {
     echo ""
     echo "=== Top 5 Leaderboard ($level level) ==="
-    if [[ ! -f "$log_file" ]]; then
-        echo "No games recorded yet."
+    if [[ ! -s "$clean_log_file" ]]; then
+        echo "No ${level} games played yet."
         return
     fi
 
-    awk -F'|' -v lvl="$level" '
-        NF == 6 && $2 == lvl && $5 ~ /^[0-9]+$/ && $6 ~ /^[0-9]+$/ {
+    local ranked
+    ranked=$(awk -F'|' -v lvl="$level" '
+        $2 == lvl {
             player = $1
             tries = $5 + 0
             secs = $6 + 0
@@ -117,7 +156,14 @@ show_leaderboard() {
                 printf "%d|%d|%s\n", best_tries[p], best_secs[p], p
             }
         }
-    ' "$log_file" | sort -t'|' -k1,1n -k2,2n | head -n 5 | awk -F'|' '
+    ' "$clean_log_file" | sort -t'|' -k1,1n -k2,2n | head -n 5)
+
+    if [[ -z "$ranked" ]]; then
+        echo "No ${level} games played yet."
+        return
+    fi
+
+    printf "%s\n" "$ranked" | awk -F'|' '
         BEGIN { printf "%-4s | %-15s | %-5s | %-7s\n", "Rank", "Player", "Tries", "Seconds"; print "----------------------------------------" }
         { printf "%-4s | %-15s | %-5s | %-7s\n", NR, $3, $1, $2 }
     '
@@ -125,60 +171,42 @@ show_leaderboard() {
 
 delete_history() {
     if [[ ! -f "$log_file" ]]; then
-        echo "No history file found."
+        echo "No games yet"
         return
     fi
 
     read -r -p "Are you sure you want to delete all history for '$name'? (y/n): " confirm
     case "${confirm,,}" in
-        y|yes)
+        y)
+            local removed_count
+            removed_count=$(awk -F'|' -v p="$name" '$1 == p { count++ } END { print count + 0 }' "$log_file")
             local tmp_file
             tmp_file=$(mktemp)
             awk -F'|' -v p="$name" '$1 != p' "$log_file" > "$tmp_file" && mv "$tmp_file" "$log_file"
-            echo "History for '$name' has been deleted."
+            echo "Deleted ${removed_count} game(s)"
+            ;;
+        n)
+            echo "Nothing deleted."
             ;;
         *)
-            echo "Deletion cancelled."
+            echo "Please answer y or n. Nothing deleted."
             ;;
     esac
 }
 
 play_game() {
-    local damaged_count=0
     local old_best=""
 
-    if [[ -f "$log_file" ]]; then
-        while IFS= read -r line || [[ -n "$line" ]]; do
-            [[ -z "$line" ]] && continue
-
-            local pipe_count
-            pipe_count=$(echo -n "$line" | tr -cd '|' | wc -c)
-            if (( pipe_count != 5 )); then
-                ((damaged_count++))
-                continue
-            fi
-
-            local f_player f_level f_tries f_seconds
-            f_player=$(echo "$line" | cut -d '|' -f1)
-            f_level=$(echo "$line" | cut -d '|' -f2)
-            f_tries=$(echo "$line" | cut -d '|' -f5)
-            f_seconds=$(echo "$line" | cut -d '|' -f6)
-
-            if [[ -z "$f_player" ]] || [[ ! "$f_level" =~ ^(easy|normal|hard)$ ]] || [[ ! "$f_tries" =~ ^[0-9]+$ ]] || [[ ! "$f_seconds" =~ ^[0-9]+$ ]]; then
-                ((damaged_count++))
-                continue
-            fi
-
+    # Read personal best for the current player and level from the clean data
+    if [[ -s "$clean_log_file" ]]; then
+        local f_player f_level f_start f_end f_tries f_seconds
+        while IFS='|' read -r f_player f_level f_start f_end f_tries f_seconds; do
             if [[ "$f_player" == "$name" && "$f_level" == "$level" ]]; then
-                if [[ -z "$old_best" ]] || (( f_tries < old_best )); then
+                if [[ -z "$old_best" ]] || (( 10#$f_tries < 10#$old_best )); then
                     old_best=$f_tries
                 fi
             fi
-        done < "$log_file"
-    fi
-
-    if (( damaged_count > 0 )); then
-        echo "Warning: $damaged_count damaged line(s) were found and skipped"
+        done < "$clean_log_file"
     fi
 
     local guess=-1
@@ -204,7 +232,6 @@ play_game() {
             continue
         fi
 
-        # Refuse out-of-range guesses without counting them as tries
         if (( 10#$guess < min || 10#$guess > max )); then
             echo "Out of range! Please enter a number between $min and $max."
             guess=-1
@@ -244,6 +271,7 @@ echo "==========================="
 
 while true; do
     echo ""
+    load_clean_games
     echo "Player: $name · Level: $level ($min-$max)"
     echo "Menu:"
     echo "  1) Play"
