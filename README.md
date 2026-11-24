@@ -20,15 +20,15 @@ I built this project to practice writing clean Bash scripts—specifically handl
 
 ## 📷 Screenshots
 
-![Bash Script](assets/images/your-screenshot-filename.png)
+![guess-game](<assets/images/Screenshot From 2026-10-24 09-18-08.png>)
 
 ## ⚙ Installation & Setup
 
 Clone the repository and make the script executable:
 
-    git clone https://github.com
+    git clone https://github.com/NyapB/bash_05_guess_game.git
     cd bash_05_guess_game
-    chmod +x guessing-game.sh
+    chmod +x guess-game.sh
 
 ## 💻 How to Start the Game
 
